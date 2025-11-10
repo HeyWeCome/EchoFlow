@@ -1,0 +1,48 @@
+data:
+  dataset: douban
+  interactions_path: null
+  root: dataset
+  min_len: 4
+  batch_size: 512
+  num_workers: 4
+  pin_memory: true
+  persistent_workers: true
+  prefetch_factor: 2
+  train_max_len: 20
+  eval_max_len: 20
+
+model:
+  d_model: 64
+  n_heads: 4
+  n_layers: 2
+  dropout: 0.1
+  topk: [5, 10, 20]
+  mask_prob: 0.25
+  refine_steps: 5
+  # Time-step auto partitioning: adaptively choose K by timestamp distribution
+  time_step_split: auto
+  auto_min_bins: 3
+  auto_max_bins: 10
+
+optim:
+  lr: 0.001
+  weight_decay: 0.01
+
+trainer:
+  max_epochs: 300
+  seed: 42
+  default_root_dir: ./lightning_logs
+  accelerator: auto
+  devices: auto
+  log_every_n_steps: 50
+  precision: 32
+  enable_tf32: true
+  early_stopping:
+    monitor: val_acc
+    mode: max
+    patience: 10
+  # Run logs: use name/version to differentiate experiment directories
+  logger: csv
+  logger_name: GenIDP
+  # Optional fixed version; leave null to auto-increment as version_0/1/..
+  logger_version: null
