@@ -167,6 +167,18 @@ Metrics
 - Hit@k and MAP@k (`utils.metrics.compute_hit_map_at_k`)
 - Accuracy (top-1)
 
+Protocol differences vs prior papers
+- Reported results on `android`, `memetracker`, `twitter`, and `douban` may differ from some original papers because EchoFlow adopts a strict leave-one-out (LOO) evaluation protocol instead of full-sequence prediction.
+- Concretely: for validation we predict the event at position `L-2` given `seq[:L-2]`; for test we predict the last event `L-1` given `seq[:L-1]`. Training uses all contexts from `t=1 .. L-3`, holding out the final two events to avoid leakage.
+- Many prior works evaluate by teacher-forcing across every position of the full sequence or by windowed next-step prediction; those protocols can inflate metrics when the model is exposed to future tokens during evaluation or when early tokens are easier to predict.
+
+Why LOO (advantages)
+- Leakage-resistant: holding out the final two events ensures no future information enters validation/test.
+- Fair across lengths: every cascade contributes exactly one validation and one test target, avoiding over-weighting long cascades.
+- Realistic next-user prediction: the hardest (near-tail) events are evaluated, closer to deployment scenarios.
+- Stable early stopping: validation `val_acc` is computed on consistent LOO targets, improving comparability across runs.
+- Reproducible metrics: unified Hit@k/MAP@k over the same target positions simplifies cross-model comparison.
+
 ## Models
 Supported models (set via `--model_name`):
 - `cyan_rnn`: Sequence baseline (GRU/LSTM configurable via `rnn_type`).
