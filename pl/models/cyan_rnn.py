@@ -166,8 +166,43 @@ class CYANRNNLM(pl.LightningModule):
             self.log(f"{stage}_acc", acc, prog_bar=True, on_step=False, on_epoch=True)
             return loss
 
+        target: torch.Tensor = batch.get("target")
+        B = x.size(0)
+        last_idx = lengths - 1
+        last_hidden = x[torch.arange(B, device=x.device), last_idx]
+
+        if stage == "train" and target is not None:
+            vocab_size = self.head.out_features
+            neg_k = int(self.neg_k)
+            device = last_hidden.device
+            candidates = torch.empty(B, 1 + neg_k, dtype=torch.long, device=device)
+            candidates[:, 0] = target
+
+            for i in range(B):
+                cnt = 0
+                while cnt < neg_k:
+                    samp = torch.randint(1, vocab_size, (neg_k,), device=device)
+                    samp = samp[~samp.eq(target[i])]
+                    take = min(neg_k - cnt, samp.numel())
+                    if take > 0:
+                        candidates[i, 1 + cnt : 1 + cnt + take] = samp[:take]
+                        cnt += take
+
+            weight = self.head.weight[candidates]
+            bias = self.head.bias[candidates] if self.head.bias is not None else None
+            logits = torch.einsum("bkd,bd->bk", weight, last_hidden)
+            if bias is not None:
+                logits = logits + bias
+            labels = torch.zeros(B, dtype=torch.long, device=device)
+            loss = F.cross_entropy(logits, labels)
+            acc = (logits.argmax(dim=-1) == labels).float().mean()
+
+            self.log(f"{stage}_loss", loss, prog_bar=True, on_step=True, on_epoch=True)
+            self.log(f"{stage}_acc", acc, prog_bar=True, on_step=False, on_epoch=True)
+            return loss
+
         # Validation/test: classify using the last fused hidden representation
-        target: torch.Tensor = batch["target"]
+        target = batch["target"]
         B = x.size(0)
         last_idx = lengths - 1
         last_hidden = x[torch.arange(B, device=x.device), last_idx]
