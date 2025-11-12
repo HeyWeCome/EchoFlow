@@ -224,6 +224,31 @@ def collate_eval(
     }
 
 
+def collate_train_pairs(
+    batch: List[Tuple[List[int], int]], pad_idx: int = 0, max_len: Optional[int] = None
+):
+    contexts = []
+    targets = []
+    for ctx, tgt in batch:
+        if max_len is not None and len(ctx) > max_len:
+            ctx = ctx[-max_len:]
+        contexts.append(torch.tensor(ctx, dtype=torch.long))
+        targets.append(tgt)
+    targets_t = torch.tensor(targets, dtype=torch.long)
+    lengths = torch.tensor([len(c) for c in contexts], dtype=torch.long)
+    max_len_b = int(lengths.max().item())
+    padded_users = torch.full((len(contexts), max_len_b), pad_idx, dtype=torch.long)
+    for i, cu in enumerate(contexts):
+        padded_users[i, : len(cu)] = cu
+    key_padding_mask = padded_users.eq(pad_idx)
+    return {
+        "input_ids": padded_users,
+        "key_padding_mask": key_padding_mask,
+        "lengths": lengths,
+        "target": targets_t,
+    }
+
+
 def collate_train_seq(batch: List[Dict[str, Any]], pad_idx: int = 0, max_len: Optional[int] = None):
     """Collate full sequences for sequence-level training with timestamps and topic ids.
     Returns padded input (users), timestamps, topic_ids, key padding mask, and lengths.
@@ -273,6 +298,7 @@ class CascadesDataModule(pl.LightningDataModule):
         prefetch_factor: Optional[int] = 2,
         train_max_len: Optional[int] = None,
         eval_max_len: Optional[int] = None,
+        train_style: str = "seq",
     ):
         super().__init__()
         self.interactions_path = interactions_path
@@ -286,6 +312,7 @@ class CascadesDataModule(pl.LightningDataModule):
         self.prefetch_factor = prefetch_factor if num_workers > 0 else None
         self.train_max_len = train_max_len
         self.eval_max_len = eval_max_len
+        self.train_style = train_style
 
         # To be set in setup()
         self.user2idx: Dict[str, int] = {}
@@ -321,7 +348,11 @@ class CascadesDataModule(pl.LightningDataModule):
         self.num_topics = len(topic2idx) + 1
 
         # Build datasets
-        self.train_ds = CascadeTrainSeqDataset(items)
+        if str(self.train_style).lower() == "pairs":
+            seqs = [obj["users"] for obj in items]
+            self.train_ds = CascadeTrainDataset(seqs)
+        else:
+            self.train_ds = CascadeTrainSeqDataset(items)
         self.val_ds = CascadeEvalDataset(items, use_last=False)
         self.test_ds = CascadeEvalDataset(items, use_last=True)
 
@@ -333,7 +364,11 @@ class CascadesDataModule(pl.LightningDataModule):
             "num_workers": self.num_workers,
             "pin_memory": self.pin_memory,
             "persistent_workers": self.persistent_workers,
-            "collate_fn": lambda b: collate_train_seq(b, pad_idx=0, max_len=self.train_max_len),
+            "collate_fn": (
+                (lambda b: collate_train_pairs(b, pad_idx=0, max_len=self.train_max_len))
+                if str(self.train_style).lower() == "pairs"
+                else (lambda b: collate_train_seq(b, pad_idx=0, max_len=self.train_max_len))
+            ),
         }
         if self.prefetch_factor is not None:
             kwargs["prefetch_factor"] = int(self.prefetch_factor)

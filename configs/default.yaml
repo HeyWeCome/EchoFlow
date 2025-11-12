@@ -3,13 +3,14 @@ data:
   interactions_path: null
   root: dataset
   min_len: 4
-  batch_size: 512
+  batch_size: 128
   num_workers: 4
   pin_memory: true
   persistent_workers: true
   prefetch_factor: 2
   train_max_len: 20
   eval_max_len: 20
+  train_style: pairs
 
 model:
   d_model: 64

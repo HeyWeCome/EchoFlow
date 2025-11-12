@@ -42,11 +42,12 @@ def parse_args():
     group_data.add_argument("--interactions_path", help="Explicit path to interactions.inter (overrides --dataset)")
     group_data.add_argument("--root", default="dataset", help="Root dir for --dataset shortcut (default: dataset)")
     group_data.add_argument("--min_len", type=int, default=4, help="Minimum cascade length (default: 4)")
-    group_data.add_argument("--batch_size", type=int, default=1024, help="Batch size")
+    group_data.add_argument("--batch_size", type=int, default=128, help="Batch size")
     group_data.add_argument("--num_workers", type=int, default=4, help="DataLoader workers")
     group_data.add_argument("--pin_memory", action="store_true", default=None, help="Enable DataLoader pin_memory")
     group_data.add_argument("--persistent_workers", action="store_true", default=None, help="Enable persistent workers (requires num_workers>0)")
     group_data.add_argument("--prefetch_factor", type=int, default=None, help="DataLoader prefetch_factor (requires num_workers>0)")
+    group_data.add_argument("--train_style", choices=["seq", "pairs"], default="pairs", help="Training style: sequence loss or pairwise target with negative sampling")
 
     group_model = p.add_argument_group("model")
     group_model.add_argument("--model_name", type=str, default="baseline", help="Model name (located at pl/models/<name>.py, must provide build_model(...))")
@@ -93,6 +94,7 @@ def main():
         "pin_memory": args.pin_memory,
         "persistent_workers": args.persistent_workers,
         "prefetch_factor": args.prefetch_factor,
+        "train_style": args.train_style,
         "train_max_len": None,
         "eval_max_len": None,
     })
@@ -124,11 +126,12 @@ def main():
         dataset=data_cfg.get("dataset"),
         root=data_cfg.get("root", "dataset"),
         min_len=int(data_cfg.get("min_len", 4)),
-        batch_size=int(data_cfg.get("batch_size", 64)),
+        batch_size=int(data_cfg.get("batch_size", 128)),
         num_workers=int(data_cfg.get("num_workers", 0)),
         pin_memory=bool(data_cfg.get("pin_memory", True)),
         persistent_workers=bool(data_cfg.get("persistent_workers", True)),
         prefetch_factor=data_cfg.get("prefetch_factor", 2),
+        train_style=str(data_cfg.get("train_style", "seq")),
         train_max_len=data_cfg.get("train_max_len"),
         eval_max_len=data_cfg.get("eval_max_len"),
     )
@@ -146,8 +149,10 @@ def main():
         mod_path = f"pl.models.{name}"
         try:
             mod = importlib.import_module(mod_path)
-        except Exception as e:
-            raise ImportError(f"Failed to import model module {mod_path}: {e}")
+        except Exception:
+            # Try developing fallback: pl.models.developing.<name>
+            dev_path = f"pl.models.developing.{name}"
+            mod = importlib.import_module(dev_path)
         builder = None
         if hasattr(mod, "build_model"):
             builder = getattr(mod, "build_model")
