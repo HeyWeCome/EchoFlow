@@ -347,6 +347,40 @@ class CascadesDataModule(pl.LightningDataModule):
         self.num_users = len(user2idx) + 1  # include PAD at 0
         self.num_topics = len(topic2idx) + 1
 
+        try:
+            n_users = len(user2idx)
+            n_topics = len(topic2idx)
+            n_inter = len(rows)
+            density = float(n_inter) / float(max(1, n_users * n_topics))
+            ts = [r[2] for r in rows]
+            if ts:
+                t = torch.tensor(ts, dtype=torch.float32)
+                q = torch.quantile(t, torch.tensor([0.25, 0.5, 0.75]))
+                t_min = int(t.min().item())
+                t_max = int(t.max().item())
+                t_p25 = int(q[0].item())
+                t_p50 = int(q[1].item())
+                t_p75 = int(q[2].item())
+            else:
+                t_min = t_max = t_p25 = t_p50 = t_p75 = 0
+            lens = []
+            for seq in cascades.values():
+                s = set(u for u, _ in seq)
+                lens.append(len(s))
+            if lens:
+                med_len = int(torch.tensor(lens, dtype=torch.float32).median().item())
+            else:
+                med_len = 0
+            print(
+                f"[DataStats] users={n_users}, topics={n_topics}, interactions={n_inter}, density={density:.6f}"
+            )
+            print(
+                f"[DataStats] timestamps: min={t_min}, p25={t_p25}, median={t_p50}, p75={t_p75}, max={t_max}"
+            )
+            print(f"[DataStats] per-topic unique users median={med_len}")
+        except Exception:
+            pass
+
         # Build datasets
         if str(self.train_style).lower() == "pairs":
             seqs = [obj["users"] for obj in items]
