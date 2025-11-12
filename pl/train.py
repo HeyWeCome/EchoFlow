@@ -48,6 +48,11 @@ def parse_args():
     group_data.add_argument("--persistent_workers", action="store_true", default=None, help="Enable persistent workers (requires num_workers>0)")
     group_data.add_argument("--prefetch_factor", type=int, default=None, help="DataLoader prefetch_factor (requires num_workers>0)")
     group_data.add_argument("--train_style", choices=["seq", "pairs"], default="pairs", help="Training style: sequence loss or pairwise target with negative sampling")
+    group_data.add_argument("--window_enabled", action="store_true", default=None, help="Enable sliding window sampling for long cascades")
+    group_data.add_argument("--window_len_mode", choices=["auto", "fixed"], default=None, help="Window length mode")
+    group_data.add_argument("--window_len_cap", type=int, default=None, help="Max window length cap")
+    group_data.add_argument("--window_stride", type=int, default=None, help="Window stride; if unset, use ratio")
+    group_data.add_argument("--window_stride_ratio", type=float, default=None, help="Window stride ratio when stride is unset")
 
     group_model = p.add_argument_group("model")
     group_model.add_argument("--model_name", type=str, default="baseline", help="Model name (located at pl/models/<name>.py, must provide build_model(...))")
@@ -56,6 +61,11 @@ def parse_args():
     group_model.add_argument("--n_layers", type=int, default=2)
     group_model.add_argument("--dropout", type=float, default=0.1)
     group_model.add_argument("--topk", type=int, nargs="+", default=None, help="Top-k list for metrics (e.g., 5 10 20)")
+    group_model.add_argument("--diffusion_steps", type=int, default=None, help="SeqDiff: number of diffusion steps (e.g., 5; None disables diffusion)")
+    group_model.add_argument("--diffusion_schedule", choices=["linear", "cosine"], default=None, help="SeqDiff: beta schedule type")
+    group_model.add_argument("--condition_xt", action="store_true", default=None, help="SeqDiff: condition on corrupted label x_t")
+    group_model.add_argument("--mc_samples", type=int, default=None, help="SeqDiff: MC Dropout samples at eval (0 to disable)")
+    group_model.add_argument("--temperature", type=float, default=None, help="SeqDiff: inference temperature scaling")
 
     group_opt = p.add_argument_group("optim")
     group_opt.add_argument("--lr", type=float, default=1e-3)
@@ -97,6 +107,11 @@ def main():
         "train_style": args.train_style,
         "train_max_len": None,
         "eval_max_len": None,
+        "window_enabled": args.window_enabled,
+        "window_len_mode": args.window_len_mode,
+        "window_len_cap": args.window_len_cap,
+        "window_stride": args.window_stride,
+        "window_stride_ratio": args.window_stride_ratio,
     })
     model_cfg = _override(cfg.get("model", {}), {
         "d_model": args.d_model,
@@ -104,6 +119,11 @@ def main():
         "n_layers": args.n_layers,
         "dropout": args.dropout,
         "topk": args.topk,
+        "diffusion_steps": args.diffusion_steps,
+        "diffusion_schedule": args.diffusion_schedule,
+        "condition_xt": args.condition_xt,
+        "mc_samples": args.mc_samples,
+        "temperature": args.temperature,
     })
     optim_cfg = _override(cfg.get("optim", {}), {
         "lr": args.lr,
@@ -134,6 +154,11 @@ def main():
         train_style=str(data_cfg.get("train_style", "seq")),
         train_max_len=data_cfg.get("train_max_len"),
         eval_max_len=data_cfg.get("eval_max_len"),
+        window_enabled=bool(data_cfg.get("window_enabled", False)),
+        window_len_mode=str(data_cfg.get("window_len_mode", "auto")),
+        window_len_cap=data_cfg.get("window_len_cap", 64),
+        window_stride=data_cfg.get("window_stride"),
+        window_stride_ratio=data_cfg.get("window_stride_ratio", 0.5),
     )
 
     # Prepare to know vocab size

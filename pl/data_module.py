@@ -299,6 +299,11 @@ class CascadesDataModule(pl.LightningDataModule):
         train_max_len: Optional[int] = None,
         eval_max_len: Optional[int] = None,
         train_style: str = "seq",
+        window_enabled: bool = False,
+        window_len_mode: str = "auto",
+        window_len_cap: int = 64,
+        window_stride: Optional[int] = None,
+        window_stride_ratio: float = 0.5,
     ):
         super().__init__()
         self.interactions_path = interactions_path
@@ -313,6 +318,11 @@ class CascadesDataModule(pl.LightningDataModule):
         self.train_max_len = train_max_len
         self.eval_max_len = eval_max_len
         self.train_style = train_style
+        self.window_enabled = window_enabled
+        self.window_len_mode = window_len_mode
+        self.window_len_cap = window_len_cap
+        self.window_stride = window_stride
+        self.window_stride_ratio = window_stride_ratio
         self._stats_printed = False
 
         # To be set in setup()
@@ -380,16 +390,83 @@ class CascadesDataModule(pl.LightningDataModule):
                     f"[DataStats] timestamps: min={t_min}, p25={t_p25}, median={t_p50}, p75={t_p75}, max={t_max}"
                 )
                 print(f"[DataStats] per-topic unique users median={med_len}")
+                if self.window_enabled:
+                    try:
+                        lens_full = [len(obj["users"]) for obj in items]
+                        if lens_full:
+                            t = torch.tensor(lens_full, dtype=torch.float32)
+                            p50 = int(torch.quantile(t, torch.tensor(0.5)).item())
+                            p75 = int(torch.quantile(t, torch.tensor(0.75)).item())
+                            p90 = int(torch.quantile(t, torch.tensor(0.9)).item())
+                        else:
+                            p50 = p75 = p90 = 0
+                        print(f"[DataStats] cascade length p50={p50}, p75={p75}, p90={p90}")
+                    except Exception:
+                        pass
                 self._stats_printed = True
         except Exception:
             pass
 
         # Build datasets
-        if str(self.train_style).lower() == "pairs":
-            seqs = [obj["users"] for obj in items]
-            self.train_ds = CascadeTrainDataset(seqs)
+        if self.window_enabled:
+            lens_full = [len(obj["users"]) for obj in items]
+            if lens_full:
+                t = torch.tensor(lens_full, dtype=torch.float32)
+                q75 = int(torch.quantile(t, torch.tensor(0.75)).item())
+            else:
+                q75 = self.min_len
+            base_len = q75 if str(self.window_len_mode).lower() == "auto" else self.window_len_cap
+            wl_base = min(int(base_len), int(self.window_len_cap))
+            wl_base = max(1, wl_base)
+            stride_base = int(self.window_stride) if self.window_stride is not None else max(1, int(wl_base * float(self.window_stride_ratio)))
+            window_items: List[Dict[str, Any]] = []
+            window_seqs: List[List[int]] = []
+            for obj in items:
+                users = obj["users"]
+                times = obj["times"]
+                topic = obj["topic"]
+                L = len(users)
+                wl = min(L, wl_base)
+                s = stride_base
+                if L <= wl:
+                    if str(self.train_style).lower() == "pairs":
+                        window_seqs.append(users)
+                    else:
+                        window_items.append({"topic": topic, "users": users, "times": times})
+                else:
+                    start = 0
+                    while start + wl < L:
+                        end = start + wl
+                        u_win = users[start:end]
+                        t_win = times[start:end]
+                        if str(self.train_style).lower() == "pairs":
+                            window_seqs.append(u_win)
+                        else:
+                            window_items.append({"topic": topic, "users": u_win, "times": t_win})
+                        start += s
+                    u_win = users[L - wl : L]
+                    t_win = times[L - wl : L]
+                    if str(self.train_style).lower() == "pairs":
+                        window_seqs.append(u_win)
+                    else:
+                        window_items.append({"topic": topic, "users": u_win, "times": t_win})
+            if str(self.train_style).lower() == "pairs":
+                self.train_ds = CascadeTrainDataset(window_seqs)
+            else:
+                self.train_ds = CascadeTrainSeqDataset(window_items)
+            self.train_max_len = wl_base
+            try:
+                n_win = len(window_seqs) if str(self.train_style).lower() == "pairs" else len(window_items)
+                avg_win_per_topic = float(n_win) / float(max(1, len(topic2idx)))
+                print(f"[Window] enabled=true, wl_base={wl_base}, stride={stride_base}, windows={n_win}, avg_per_topic={avg_win_per_topic:.2f}")
+            except Exception:
+                pass
         else:
-            self.train_ds = CascadeTrainSeqDataset(items)
+            if str(self.train_style).lower() == "pairs":
+                seqs = [obj["users"] for obj in items]
+                self.train_ds = CascadeTrainDataset(seqs)
+            else:
+                self.train_ds = CascadeTrainSeqDataset(items)
         self.val_ds = CascadeEvalDataset(items, use_last=False)
         self.test_ds = CascadeEvalDataset(items, use_last=True)
 
