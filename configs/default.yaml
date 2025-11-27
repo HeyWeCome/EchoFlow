@@ -13,7 +13,7 @@ data:
   train_style: pairs
   window_enabled: true
   window_len_mode: auto
-  window_len_cap: 64
+  window_len_cap: 20
   window_stride: null
   window_stride_ratio: 0.5
 
@@ -29,6 +29,7 @@ model:
   time_step_split: auto
   auto_min_bins: 3
   auto_max_bins: 10
+  # Leave uprop-specific toggles to CLI; keep model core params here only
 
 optim:
   lr: 0.001

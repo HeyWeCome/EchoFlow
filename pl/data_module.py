@@ -420,7 +420,6 @@ class CascadesDataModule(pl.LightningDataModule):
             wl_base = max(1, wl_base)
             stride_base = int(self.window_stride) if self.window_stride is not None else max(1, int(wl_base * float(self.window_stride_ratio)))
             window_items: List[Dict[str, Any]] = []
-            window_seqs: List[List[int]] = []
             for obj in items:
                 users = obj["users"]
                 times = obj["times"]
@@ -429,34 +428,29 @@ class CascadesDataModule(pl.LightningDataModule):
                 wl = min(L, wl_base)
                 s = stride_base
                 if L <= wl:
-                    if str(self.train_style).lower() == "pairs":
-                        window_seqs.append(users)
-                    else:
-                        window_items.append({"topic": topic, "users": users, "times": times})
+                    window_items.append({"topic": topic, "users": users, "times": times})
                 else:
                     start = 0
                     while start + wl < L:
                         end = start + wl
                         u_win = users[start:end]
                         t_win = times[start:end]
-                        if str(self.train_style).lower() == "pairs":
-                            window_seqs.append(u_win)
-                        else:
-                            window_items.append({"topic": topic, "users": u_win, "times": t_win})
+                        window_items.append({"topic": topic, "users": u_win, "times": t_win})
                         start += s
                     u_win = users[L - wl : L]
                     t_win = times[L - wl : L]
-                    if str(self.train_style).lower() == "pairs":
-                        window_seqs.append(u_win)
-                    else:
-                        window_items.append({"topic": topic, "users": u_win, "times": t_win})
+                    window_items.append({"topic": topic, "users": u_win, "times": t_win})
+
             if str(self.train_style).lower() == "pairs":
+                window_seqs = [x["users"] for x in window_items]
                 self.train_ds = CascadeTrainDataset(window_seqs)
+                self.train_ds.items = window_items
             else:
                 self.train_ds = CascadeTrainSeqDataset(window_items)
+
             self.train_max_len = wl_base
             try:
-                n_win = len(window_seqs) if str(self.train_style).lower() == "pairs" else len(window_items)
+                n_win = len(window_items)
                 avg_win_per_topic = float(n_win) / float(max(1, len(topic2idx)))
                 print(f"[Window] enabled=true, wl_base={wl_base}, stride={stride_base}, windows={n_win}, avg_per_topic={avg_win_per_topic:.2f}")
             except Exception:
@@ -465,6 +459,7 @@ class CascadesDataModule(pl.LightningDataModule):
             if str(self.train_style).lower() == "pairs":
                 seqs = [obj["users"] for obj in items]
                 self.train_ds = CascadeTrainDataset(seqs)
+                self.train_ds.items = items
             else:
                 self.train_ds = CascadeTrainSeqDataset(items)
         self.val_ds = CascadeEvalDataset(items, use_last=False)
